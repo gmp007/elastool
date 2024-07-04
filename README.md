@@ -210,7 +210,7 @@ If you have used ElasTool in your research, please, consider citing the appropri
 
 ### Main ElasTool Implementation
 - Please cite for ElasTool's primary implementation:
-  - [ElasTool: An automated toolkit for elastic constants calculation](https://doi.org/10.1016/j.cpc.2021.108180) - Liu et al., 2022
+  - [ElasTool: An automated toolkit for elastic constants calculation](https://doi.org/10.1016/j.cpc.2021.108180) - Liu, Ekuma, et al., 2022
 
 @article{Liu2020elastool,
   title = {ElasTool: An automated toolkit for elastic constants calculation},
@@ -224,6 +224,18 @@ If you have used ElasTool in your research, please, consider citing the appropri
   author = {Zhong-Li Liu and C.E. Ekuma and Wei-Qi Li and Jian-Qun Yang and Xing-Ji Li}
 }
 
+
+  - [ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials] - Ekuma and Liu, 2024
+@article{Ekuma2024,
+  title = {ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials},
+  journal = {Computer Physics Communications},
+  volume = {300},
+  pages = {109161},
+  year = {2024},
+  doi = {10.1016/j.cpc.2024.109161},
+  url = {https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub},
+  author = {Chinedu E. Ekuma and Zhong-Li Liu }
+}
   - [Efficient prediction of temperature-dependent elastic and mechanical properties of 2D materials](https://www.nature.com/articles/s41598-022-07819-8) - Kastuar et al., 2022
   
 @article{Kastuar2022efficient,
@@ -255,7 +267,7 @@ If you have used ElasTool in your research, please, consider citing the appropri
 - For work specifically on 2D materials, refer to:
   - [Efficient prediction of temperature-dependent elastic and mechanical properties of 2D materials](https://www.nature.com/articles/s41598-022-06650-1) - Kastuar et al., 2022
 
-### Work Related to Tubular 2D-based Nanostructures and Nanotubes, and Advanced Visualization
+### Work Related to Tubular 2D-Based Nanostructures and Nanotubes, and Advanced Visualization
 - For studies on tubular 2D-based nanostructures and nanotubes, please consider citing:
   - [ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials](https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub) - Ekuma and Liu
 
@@ -279,5 +291,3 @@ Feel free to contact us via email:
 - [zl.liu@163.com](mailto:zl.liu@163.com)
 
 Your feedback and questions are invaluable to us, and we look forward to hearing from you.
-
-
