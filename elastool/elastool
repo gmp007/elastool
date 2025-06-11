@@ -6,7 +6,7 @@ import math
 from datetime import datetime
 from os import getcwd, mkdir, chdir
 from os.path import isdir, isfile
-from ase.io import read
+from ase.io import read,write
 from find_spg import find_crystal_system
 from calc_elastic_constants import calc_elastic_constants
 from deform_cell_ohess_strains import deform_cell_ohess_strains
@@ -16,7 +16,7 @@ from make_conv_cell import make_conventional_cell
 from read_input import indict,post_process
 from relax_atoms_pos import relax_atoms_pos
 from calc_stress import calc_stress, calculate_total_energy_density
-from optimize_initial_str import optimize_initial_str
+from optimize_initial_str import optimize_initial_str,remove_spurious_distortion
 from extract_mean_values import mean_stress,mean_pressure,mean_temperature,mean_volume
 from ase.io import vasp
 from equilibrium_md import equil_md
@@ -26,6 +26,7 @@ from plot_christoffel_gnu import write_gnuplot_scripts, run_gnuplot_scripts
 from read_flags import get_gnuplot_scripts_path, print_boxed_message, write_line, print_banner, write_run_christoffel_script
 from elastool_elate_browser import ElateAutomation
 #from predict_thickness_2D import predict_thickness_2D
+
 
 import pkg_resources
 
@@ -45,11 +46,57 @@ except ImportError:
     version = pkg_resources.get_distribution("ElasTool").version
 
 
+
+    
 include_gnuplot_scripts = True
 
 
 total_time_start = datetime.now()
 print_banner(version,"started",ec_file=None)
+
+
+
+from pymatgen.io.vasp.outputs import Vasprun, Oszicar, Outcar
+
+def sanitize(path):
+    """
+    Check if vasprun.xml in `path` is converged. If not, remove old input files
+    so a new input can be prepared. Return True if converged or no problem, else False.
+    """
+    try:
+        run = Vasprun(os.path.join(path,'vasprun.xml'))
+        if run.converged:
+            msg = f'Converged VASP run detected in {path}, no sanitization needed.'
+            print(msg)
+            return True
+        else:
+            #raise ValueError
+            print(f"Warning: The VASP run in {path} did not converge.")
+    except Exception as e:
+        msg = str(e)
+        print(msg)
+        msg = ('Found unconverged, nonexistent or damaged VASP run in '+path
+               +', starting sanitization')
+        print(msg)
+        try:
+            # backup
+            st_temp = Structure.from_file(os.path.join(path,'CONTCAR'))
+            copyfile(os.path.join(path,'CONTCAR'), os.path.join(path,'CONTCAR.bk'))
+            print('backed up CONTCAR')
+        except Exception as e2:
+            print(str(e2))
+            print(f'no valid CONTCAR found in {path}')
+        for ffile in [
+            'INCAR','INCAR.orig','KPOINTS','KPOINTS.orig','POTCAR','POTCAR.orig'
+        ]:
+            try:
+                os.remove(os.path.join(path, ffile))
+            except:
+                pass
+        print('removed old INCAR, KPOINTS and POTCAR')
+        return False
+        
+        
 #--------------------------------------------------
 # Read in inputs
 #--------------------------------------------------
@@ -105,6 +152,8 @@ if method_stress_statistics == 'static':
 # Post-processing stuffs
 #--------------------------------------------------
 
+    
+    
 pp = False
 plotly_flag = False  # Default state of plotly_flag
 
@@ -143,11 +192,6 @@ if activate_flag:
     elate_instance.run()
     sys.exit(0)
 
-
-
-
-
-  
 
 #--------------------------------------------------
 # Main code starts here
@@ -209,6 +253,8 @@ else:
         pos_optimized = optimize_initial_str(pos_conv, cwd, 'fixed-pressure-opt',fresh=True)
     
     pos_optimized = vasp.read_vasp('%s/OPT/CONTCAR'%cwd)
+    pos_optimized = remove_spurious_distortion(pos_optimized)
+    write('%s/OPT/CONTCAR' % cwd, pos_optimized, format='vasp', direct=True)
     print("Optimization Done!")
 
 
@@ -299,12 +345,14 @@ for up in delta_list:
 
         stress_set_dict[up] = []
         for num_cell, cell_strain in enumerate(deformed_cell_list):
+            #matrix_dir = f"matrix_{num_cell}"
+            #if isdir(matrix_dir) and sanitize(matrix_dir):
+            #    print(f"{matrix_dir} already converged – skipping")
+            #    continue
             if not isdir('matrix_%s' % str(num_cell)):
                 mkdir('matrix_%s' % str(num_cell))
             chdir('matrix_%s' % str(num_cell))
-            # relax atoms positoins int the strained structure
-            #pos_conv_strain = relax_atoms_pos(pos_optimized, cell_strain, cwd)
-            # calculate stresses
+
             stress_set_dict, strain_energy_stress = calc_stress(pos_optimized, cell_strain, method_stress_statistics, stress_set_dict, num_last_samples, up, cwd)
 
             chdir('..')
@@ -429,7 +477,7 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                     'S': "Grüneisen parameter (%s) = %s", 
                     'V': "Sound velocity (%s) = %s Km/s",
                     'P': "Pugh's modulus ratio (%s) = %s",
-                    'M': "Lame's parameter (%s) = %s N/m",
+                    'λ': "Lame's parameter (%s) = %s N/m",
                     'Q': "Kleinman’s parameter (%s) = %s",
                     'T': "Debye temperature (%s) = %s K",
                     'K': "Min thermal conductivity (%s) = %s W/(m.K)",
@@ -439,11 +487,20 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                     'p': "Mean-free path @ 300 K (%s) = %s µm",
                     'C': "Linear compressibility (%s) = %.2e TPa^-1", 
                     'R': "Resonance frequency (%s) = %s GHz", 
-                    'D': "Ductility test (%s) = %s" 
+                    'D': "Ductility test (%s) = %s",
+                    'M': "Melting temperature (%s) = %s K",
+                    
  
                 } 
 
-                content = content_mapping.get(key[0], None)
+                #content = content_mapping.get(key[0], None)
+                if key in content_mapping:
+                    content = content_mapping[key]
+                elif key[0] in content_mapping:
+                    content = content_mapping[key[0]]  
+                else:
+                    content = None
+                    
                 if content:
                     if key[0] == "C":
                         write_line(ec_file, content % (key.capitalize(), elastic_constants_dict[key]))
@@ -465,9 +522,9 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                     'G': "Shear modulus (%s) = %s N/m",
                     'V': "Sound velocity (%s) = %s Km/s",
                     'P': "Pugh's modulus ratio (%s) = %s",
-                    'L': "Layer modulus (%s) = %s N/m",
+                    'l': "Layer modulus (%s) = %s N/m",
                     'T': "Debye temperature (%s) = %s K",
-                    'M': "Lame's parameter (%s) = %s N/m",
+                    'λ': "Lame's parameter (%s) = %s N/m",
                     'Q': "Kleinman’s parameter (%s) = %s",
                     'R': "Resonance frequency (%s) = %s GHz",
                     'K': "Min thermal conductivity (%s) = %s W/(m.K)",
@@ -477,17 +534,24 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                     'p': "Mean-free path @ 300 K (%s) = %s µm",
                     'C': "Linear compressibility (%s) = %.2e m/N", 
                     'R': "Resonance frequency (%s) = %s GHz", 
-                    'D': "Ductility test (%s) = %s" 
+                    'D': "Ductility test (%s) = %s",
+                    'M': "Melting temperature (%s) = %s K", 
                 }
 
-                content = content_mapping.get(key[0], None)
+                #content = content_mapping.get(key[0], None)
+                if key in content_mapping:
+                    content = content_mapping[key]
+                elif key[0] in content_mapping:
+                    content = content_mapping[key[0]]  
+                else:
+                    content = None
+                    
                 if content:
                     if key[0] == "C":
                         write_line(ec_file, content % (key.capitalize(), elastic_constants_dict[key]))
                     elif key[0] not in ["D"]:
                         write_line(ec_file, content %
                                    (key.capitalize(), "%.2f" % elastic_constants_dict[key]))
-
                     else:
                         write_line(ec_file, content % (key.capitalize(), elastic_constants_dict[key]))  
 
@@ -511,16 +575,22 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                     'D': "Ductility test (%s) = %s" 
                 }
 
-                content = content_mapping.get(key[0], None)
+                if key in content_mapping:
+                    content = content_mapping[key]
+                elif key[0] in content_mapping:
+                    content = content_mapping[key[0]]  
+                else:
+                    content = None
+                    
                 if content:
                     if key[0] == "C":
                         write_line(ec_file, content % (key.capitalize(), elastic_constants_dict[key]))
                     elif key[0] not in ["D"]:
                         write_line(ec_file, content %
                                    (key.capitalize(), "%.2f" % elastic_constants_dict[key]))
-
                     else:
                         write_line(ec_file, content % (key.capitalize(), elastic_constants_dict[key]))  
+
                         
         #strain_energy_line = "Strain Energy = {:.4f} eV".format(total_strain_energy)
         #energy_density_line = "Strain Energy Density = {:.3e} J/m^3".format(total_energy_density)
@@ -539,7 +609,7 @@ if int(indict['run_mode'][0]) == 1 or int(indict['run_mode'][0]) == 3:
                 write_line(ec_file, "Elastic anisotropy:")
 
                 write_line(ec_file, "A_U = %s" % "%.4f" % A_U)
-                write_line(ec_file, "A_L = %s" % "%.4f" % A_L)
+                write_line(ec_file, "A_L = %s" % "%.4f" % A_U)
                 if dimensional == '3D':
                     write_line(ec_file, "A_C = %s" % "%.4f" % A_C)
 
@@ -817,4 +887,7 @@ else:
     print_boxed_message();
     print("Well done! GOOD LUCK!")
     print("")
+
+
+
 

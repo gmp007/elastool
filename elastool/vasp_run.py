@@ -14,7 +14,7 @@
   E-mail: zl.liu@163.com, cekuma1@gmail.com
 
 """
-import os
+import os, pathlib
 from ase.io import vasp, cif,read, write
 from os import system
 from os.path import isfile
@@ -25,11 +25,16 @@ from read_input import indict
 from extract_mean_values import get_pressure, mean_pressure
 
 
-
-
 def vasp_run(step, kpoints_file_name, cwd):
     write_incar(step, cwd)
-    os.system("cp %s/%s KPOINTS" % (cwd, kpoints_file_name))
+    #os.system("cp %s/%s KPOINTS" % (cwd, kpoints_file_name))
+    src = os.path.join(cwd, kpoints_file_name)
+    subprocess.run(["cp", src, "KPOINTS"], check=True)
+
+    #if not src.exists():
+    #    raise FileNotFoundError(f"KPOINTS template not found: {src}")
+            
+    #shutil.copy(src, dst) 
 
     #structure_file = indict['structure_file'][0]
     structure_file = os.path.join(cwd, indict['structure_file'][0])
@@ -83,35 +88,29 @@ def vasp_run(step, kpoints_file_name, cwd):
             break
 
     if int(indict['run_mode'][0]) == 1:
-        # computcode = indict['parallel_submit_command'][3].split("/")[-1]
+
+        
+        # quick sanity check: all input files present?
+        for f in ("INCAR", "KPOINTS", "POSCAR", "POTCAR"):
+            if not os.path.isfile(f):
+                raise FileNotFoundError(f"{f} is missing in {os.getcwd()}")
+                
         para_sub_com = ''
         for i in range(len(indict['parallel_submit_command'])):
             para_sub_com += indict['parallel_submit_command'][i]
             para_sub_com += ' '
 
-        #para_sub_com = 'yhrun -p paratera -N 1 -n 24 vasp_std'
-        #print(para_sub_com)
-        #start = datetime.datetime.now()
 
+            
         go = subprocess.Popen(para_sub_com, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
 
         while go.poll() is None:
             sleep(2)
-            #if method_stress_statistics == 'dynamic' and 'NO_STRAIN_MD' in os.getcwd():
-            #    p = get_pressure('OUTCAR')
-            #    mean_press = 0.1 * mean_pressure('OUTCAR', 1)
+            
 
-            #    if mean_press is not np.nan and len(p) > 2:
-            #        if abs(mean_press - p_target) < 0.2:
-                        #os.system("killall -9 $(ps H -e -o cmd --sort=pcpu | tail -1)")
-            #            time.sleep(10)
-            #            os.system("killall -9 vasp544")
+        pos_optimized = vasp.read_vasp("CONTCAR")
 
-            #now = datetime.datetime.now()
-            #if (now - start).seconds > float(indict['MaxHour'][0])*3600:
-            #    os.system("killall -9 $(ps H -e -o cmd --sort=pcpu | tail -1)")
-            #    break
-        pos_optimized = vasp.read_vasp('CONTCAR')
 
     elif int(indict['run_mode'][0]) == 2:
         pos_optimized = pos

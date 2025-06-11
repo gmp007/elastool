@@ -5,7 +5,7 @@
 
 ##  About ElasTool
 
-ElasTool offers a flexible approach to determining elastic constants and mechanical properties of various materials at zero and finite temperatures and pressures, providing a broad scope of utility across different material conditions. It seamlessly integrates with the VASP electronic structure code. However, its architecture is open and can easily implement interfaces to other DFT packages. If you are interested in such extensions, please don't hesitate to contact the authors for further guidance and support with the ElasTool source code. The software utilizes three kinds of strain-matrix sets: High-Efficiency Strain-Matrix Sets (OHESS), Universal Linear-Independent Coupling Strains (ULICS), and All-Single-Element Strain-Matrix Sets (ASESS) [1], enabling automatic and efficient calculation of the SOECs.
+**ElasTool** offers a flexible approach to determining elastic constants and mechanical properties of various materials at zero and finite temperatures and pressures, providing a broad scope of utility across different material conditions. It seamlessly integrates with the VASP electronic structure code. However, its architecture is open and can easily implement interfaces to other DFT packages. If you are interested in such extensions, please don't hesitate to contact the authors for further guidance and support with the ElasTool source code. The software utilizes three kinds of strain-matrix sets: High-Efficiency Strain-Matrix Sets (OHESS), Universal Linear-Independent Coupling Strains (ULICS), and All-Single-Element Strain-Matrix Sets (ASESS) [1], enabling automatic and efficient calculation of the SOECs.
 
 ##  Key Features
 
@@ -21,7 +21,7 @@ The ElasTool toolkit offers several features, including:
 
 ## Expanded Capabilities
 
-ElasTool offers a comprehensive range of features for analyzing various material properties:
+**ElasTool** offers a comprehensive range of features for analyzing various material properties:
 
 - **Elastic Tensors**: Generates a detailed text file for in-depth post-processing.
 - **Young's Modulus**: Evaluates the material's stiffness under uniaxial stress.
@@ -38,9 +38,16 @@ ElasTool offers a comprehensive range of features for analyzing various material
 - **Strain Energy Density**: Provides insights into the material's energy absorption capacity.
 - **Hardness Estimation**: Employs various empirical equations to predict Vickers hardness.
 - **Fracture Toughness Analysis**: Evaluates the material's resistance to crack propagation.
+- **Melting Temperature Estimation**: Computes the melting temperature of materials using multiple complementary models. ElasTool implements the following estimators:
+  - **Anderson Model** (empirical correlation for 3D bulk materials).
+  - **Burakovsky–Preston–Greeff (BPG) Model** (based on shear modulus and atomic volume).
+  - **Lindemann Criterion** (thermodynamic criterion, available for both 3D and 2D systems).
+  - **Kosterlitz–Thouless–Halperin–Nelson–Young (KTHNY) Criterion** (for true 2D materials, using the renormalized Young’s modulus).
 - **Elastic Anisotropy**: Examines directional variations in material properties.
 - **Compliance Matrix Eigenvalues**: Investigates the material's mechanical response characteristics.
-- **Solution of the Christoffel Equations***: 
+- **Solution of the Christoffel Equations**: 
+
+
 
 The Christoffel equations have been integrated into our approach for calculating wave velocities, power factors, and enhancement factors. This integration is based on the methodology described in [Christoffel](https://www.sciencedirect.com/science/article/pii/S0010465516301795). The feature is turned on once `plotparameters` is set to `yes` in the ElasTool input file `elastol.in`. For 2D materials, we implemented an embedding method to visualize the properties in a three-dimensional plane. Specifically, the solution of the Christoffel equations generates the following output files: 
 
@@ -84,6 +91,38 @@ Upon enabling the plot feature, ElasTool generates Gnuplot scripts for automatic
 - `radius` ---- For phase velocity, showing data on a sphere with radius scaled by absolute velocity
 
 These features establish ElasTool as a versatile and indispensable toolkit for scientists and engineers specializing in materials science and engineering. Its comprehensive computational capabilities are ideal for advanced material science research, providing critical insights into the mechanical and thermal properties of various materials. Whether for academic research, industrial applications, or innovative material design, ElasTool serves as a pivotal resource in exploring and understanding the intricate behavior of 3D structures, 2D materials, and nanoscale systems.
+
+
+
+### Melting‑Temperature Estimators  
+
+**ElasTool** includes four analytic models for estimating the melting temperature \(T_{\mathrm m}\) directly from elastic data.  The model is selected automatically from the *dimension* flag you set in
+`MeltTempPredictor(dim=...)`.
+
+| model key | dimensionality | formula | comment |
+|-----------|----------------|---------|---------|
+| **anderson** | bulk 3‑D | $T_{\mathrm{m}} = 553 + 5.91\,G_0 \quad [\text{K}]$  | Anderson’s linear fit to 25 metals [Anderson 1987] |
+| **bpg** | bulk 3‑D | $T_{\mathrm{m}} = \beta\,\dfrac{G_0\,\Omega}{k_B}$ | Burakovsky‑Preston‑Greeff (β ≈ 0.032) [BPG 2003] |
+| **lindemann** | 3‑D, 2‑D | 3‑D: $T_{\mathrm{m}} = \dfrac{\delta^2 a^2 M \omega_D^2}{6 k_B}$ <br> 2‑D: $T_{\mathrm{m}} = \dfrac{\delta^2 a^2 M \omega_D^2}{4 k_B}$ | δ ≈ 0.18–0.22 (covalent) or 0.07–0.12 (2‑D); \(a\) = NN bond |
+| **kthny** | strict 2‑D | $T_{\mathrm{m}} = \dfrac{a^2 Y_R}{16 \pi k_B}, \quad Y_R = (1 - \eta) Y_0$  | Kosterlitz–Thouless–Halperin–Nelson–Young defect‑unbinding transition (η ≈ 0.5) |
+
+**Symbols**
+
+* \(G_0\) zero‑pressure shear modulus (GPa)  
+* \(\Omega\) atomic volume (\(\mathrm m^{3}\,\mathrm{atom}^{-1}\))  
+* \(M\) atomic mass (kg), \(a\) nearest‑neighbour distance (m)  
+* \(\omega_D=k_B\Theta_D/\hbar\) from the Debye temperature  
+* \(Y_0\) bare 2‑D Young modulus (N m\(^{-1}\)); \(Y_R\) is its renormalised value  
+* Defaults: β = 0.032 (metals); δ = 0.20 (2‑D covalent); η = 0.60
+
+**References for Melting Temperature**
+
+1. Anderson, O. L. *J. Phys. Chem. Solids* **1987**, 48, 909‑919  
+2. Burakovsky, L.; Preston, D. L.; Greeff, C. W. *Phys. Rev. B* **2003**, 67, 094107  
+3. Lindemann, F. A. *Phys. Z.* **1910**, 11, 609‑612  
+4. Kosterlitz, J. M.; Thouless, D. J. *J. Phys. C* **1973**, 6, 1181‑1203  
+   Halperin, B. I.; Nelson, D. R. *Phys. Rev. Lett.* **1978**, 41, 121–124  
+   Young, A. P. *Phys. Rev. B* **1979**, 19, 1855–1866
 
 
 ## ElasTool: Advanced Data Visualization and Analysis Toolkit
@@ -210,7 +249,7 @@ If you have used ElasTool in your research, please, consider citing the appropri
 
 ### Main ElasTool Implementation
 - Please cite for ElasTool's primary implementation:
-  - [ElasTool: An automated toolkit for elastic constants calculation](https://doi.org/10.1016/j.cpc.2021.108180) - Liu, Ekuma, et al., 2022
+  - [ElasTool: An automated toolkit for elastic constants calculation](https://doi.org/10.1016/j.cpc.2021.108180) - Liu et al., 2022
 
 @article{Liu2020elastool,
   title = {ElasTool: An automated toolkit for elastic constants calculation},
@@ -225,7 +264,8 @@ If you have used ElasTool in your research, please, consider citing the appropri
 }
 
 
-  - [ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials] - Ekuma and Liu, 2024
+  - [ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials](https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub) - Ekuma and Liu 
+
 @article{Ekuma2024,
   title = {ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials},
   journal = {Computer Physics Communications},
@@ -236,6 +276,7 @@ If you have used ElasTool in your research, please, consider citing the appropri
   url = {https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub},
   author = {Chinedu E. Ekuma and Zhong-Li Liu }
 }
+
   - [Efficient prediction of temperature-dependent elastic and mechanical properties of 2D materials](https://www.nature.com/articles/s41598-022-07819-8) - Kastuar et al., 2022
   
 @article{Kastuar2022efficient,
@@ -250,18 +291,7 @@ If you have used ElasTool in your research, please, consider citing the appropri
   publisher={Nature Publishing Group UK London}
 }
 
-  - [ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials](https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub) - Ekuma and Liu 
 
-@article{Ekuma2024,
-  title = {ElasTool v3.0: Efficient computational and visualization toolkit for elastic and mechanical properties of materials},
-  journal = {Computer Physics Communications},
-  volume = {300},
-  pages = {109161},
-  year = {2024},
-  doi = {10.1016/j.cpc.2024.109161},
-  url = {https://www.sciencedirect.com/science/article/abs/pii/S0010465524000845?via%3Dihub},
-  author = {Chinedu E. Ekuma and Zhong-Li Liu }
-}
 
 ### Work Related to 2D Materials
 - For work specifically on 2D materials, refer to:
@@ -291,3 +321,5 @@ Feel free to contact us via email:
 - [zl.liu@163.com](mailto:zl.liu@163.com)
 
 Your feedback and questions are invaluable to us, and we look forward to hearing from you.
+
+

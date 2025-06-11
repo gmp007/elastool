@@ -28,7 +28,7 @@ from catboost import CatBoostRegressor
 from sklearn import metrics
 from sklearn.preprocessing import StandardScaler
 from pymatgen.core.composition import Composition
-from matminer.featurizers.composition import ElectronAffinity, ElementFraction
+from matminer.featurizers.composition import ElectronAffinity, ElementFraction,ValenceOrbital
 from numpy import cross, linalg
 
 
@@ -51,8 +51,15 @@ def simplify_formula(formula):
     elements = {element: int(count) if count else 1 for element, count in elements}
 
     # Find the greatest common divisor of the counts
-    common_divisor = gcd(*elements.values())
-
+    try:
+        common_divisor = gcd(*elements.values())
+    except TypeError as e:
+        print(f"TypeError occurred: {e}, using reduce method")
+        common_divisor = reduce(gcd, elements.values())
+    except Exception as e:
+        # Handle any other unexpected exceptions
+        print(f"An unexpected error occurred: {e}")
+        return None
     # Simplify the formula
     simplified_formula = ''.join(f"{element}{(count // common_divisor) if count > common_divisor else ''}" 
                                  for element, count in elements.items())
@@ -114,15 +121,30 @@ def predict_thickness_2D(atoms, dir_modeldsave):
 
 def process_dataframe(data):
     data = pd.DataFrame(data)
+    
     # Create Composition objects
-    Comp = [Composition(value) for value in data["MaterialName"]]
+    try:
+        Comp = [Composition(value) for value in data["MaterialName"]]
+    except Exception as e:
+        raise ValueError(f"Error creating Composition objects: {e}")
+    
     data.loc[:, 'Composition'] = Comp
-
+    
     # Featurize the dataframe using ElementFraction
     ef = ElementFraction()
-    data = ef.featurize_dataframe(data, 'Composition')
+    vo = ValenceOrbital()
+    
+    try:
+        data = ef.featurize_dataframe(data, 'Composition', ignore_errors=True)
+        data = vo.featurize_dataframe(data, 'Composition', ignore_errors=True)
+    except Exception as e:
+        raise ValueError(f"Error featurizing dataframe: {e}")
+    
+    # Drop columns and rows where all values are zero or NaN
     data = data.loc[:, (data != 0).any(axis=0)]
-
+    data = data.dropna(axis=1, how='all')  # Drop columns where all values are NaN
+    data = data.dropna()  # Drop rows where any value is NaN
+    
     # Define the molecular_weight function
     def molecular_weight(formula):
         try:
@@ -135,11 +157,15 @@ def process_dataframe(data):
         except AttributeError:
             print(f"Warning: Element not found in formula {formula}")
             return None
+        except Exception as e:
+            print(f"Error calculating molecular weight for formula {formula}: {e}")
+            return None
 
     # Calculate molecular weights and add them as a new column
     data['MolWeight'] = data["MaterialName"].apply(molecular_weight)
-
+    
     return data
+
     
         
 def scale_dataframe(df,scale_df=False):
@@ -169,14 +195,13 @@ def train_and_save_best_model(X, Y, directory, dnn_gan=dnn_gan, test_size=test_s
     X_train_n, X_test, y_train_n, y_test = train_test_split(X, Y, test_size=test_size, random_state=rndseem)
 
     if dnn_gan:
-        augmenter = GANDataAugmenter(input_dim=X_train_n.shape[1],num_augmented_samples=50)
+        augmenter = GANDataAugmenter(input_dim=X_train_n.shape[1], num_augmented_samples=50)
         X_train_n.reset_index(drop=True, inplace=True)
         augmenter.train_gan(X_train_n, epochs=500)
         X_train, y_train = augmenter.augment_and_shuffle_gan(X_train_n, y_train_n)
     else:
         augmenter = DataAugmenter(mean=0, std=0.1, num_augmented_samples=50)
         X_train, y_train = augmenter.augment_and_shuffle(X_train_n, y_train_n)
-
 
     # Define models and their hyperparameters
     hyper_params_xgb = {
@@ -189,7 +214,7 @@ def train_and_save_best_model(X, Y, directory, dnn_gan=dnn_gan, test_size=test_s
         RandomForestRegressor(),
         DecisionTreeRegressor(),
         ExtraTreesRegressor(),
-      #  XGBRFRegressor(**hyper_params_xgb),
+        # XGBRFRegressor(**hyper_params_xgb),
         AdaBoostRegressor(),
         GradientBoostingRegressor(),
         ExtraTreesRegressor(),
@@ -197,7 +222,7 @@ def train_and_save_best_model(X, Y, directory, dnn_gan=dnn_gan, test_size=test_s
     ]
 
     # Initialize variables to store results
-    algorithms = pd.DataFrame()
+    algorithms = []
     best_model = None
     best_score = -float('inf')
 
@@ -225,26 +250,31 @@ def train_and_save_best_model(X, Y, directory, dnn_gan=dnn_gan, test_size=test_s
                 best_score = mean_cv_score
                 best_model = model
 
-            algorithms = algorithms.append({
+            # Append results to the list
+            algorithms.append({
                 'Algorithm': Alg,
                 'Model-Sc': round(Train_Score * 100, 2),
                 'Adj-Sc': round(adj_R2 * 100, 2),
-                #'Test-Sc': round(Test_Score * 100, 2),
+                # 'Test-Sc': round(Test_Score * 100, 2),
                 'CV-Sc': round(mean_cv_score * 100, 2),
                 'MSE': round(MSE, 2),
                 'MAE': round(MAE, 2),
                 'STD': round(STD, 2)
-            }, ignore_index=True)
+            })
 
         except Exception as e:
             print(f"Exception occurred in {Alg}: {e}")
             pass
 
+    # Convert results list to a DataFrame
+    algorithms_df = pd.DataFrame(algorithms)
+
     # Save the best model
     if best_model is not None:
         joblib.dump(best_model, f'{directory}/best_thickness_model.pkl')
 
-    return algorithms , best_model
+    return algorithms_df, best_model
+
 
 def load_thickness():
 
@@ -295,7 +325,7 @@ class DataAugmenter:
         noise = np.random.normal(self.mean, self.std, data.shape)
         return data + noise
 
-    def augment_data_continuous(self, X, y):
+    def augment_data_continuousold(self, X, y):
         """Generate noisy versions of each sample for continuous data."""
         augmented_X = []
         augmented_y = []
@@ -314,6 +344,32 @@ class DataAugmenter:
             augmented_y_df = pd.DataFrame(augmented_y, columns=y.columns)
 
         return augmented_X_df, augmented_y_df
+
+
+    def augment_data_continuous(self, X, y):
+        """Generate noisy versions of each sample for continuous data."""
+        # Convert X and y to NumPy arrays
+        X_np = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
+        y_np = y.values if isinstance(y, (pd.Series, pd.DataFrame)) else np.asarray(y)
+
+        # Repeat the data for augmentation
+        augmented_X = np.repeat(X_np, self.num_augmented_samples, axis=0)
+        augmented_y = np.repeat(y_np, self.num_augmented_samples, axis=0)
+
+        # Add Gaussian noise to repeated data
+        augmented_X = self.add_gaussian_noise(augmented_X)
+
+        # Convert back to pandas DataFrame/Series
+        augmented_X_df = pd.DataFrame(augmented_X, columns=X.columns if isinstance(X, pd.DataFrame) else None)
+        if isinstance(y, pd.Series):
+            augmented_y_df = pd.Series(augmented_y, name=y.name)
+        elif isinstance(y, pd.DataFrame):
+            augmented_y_df = pd.DataFrame(augmented_y, columns=y.columns)
+        else:
+            augmented_y_df = pd.DataFrame(augmented_y)
+
+        return augmented_X_df, augmented_y_df
+        
 
     def shuffle_dataset(self, X, y):
         """Shuffle data and labels."""

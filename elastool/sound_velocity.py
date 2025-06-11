@@ -27,6 +27,7 @@ from calc_elastic_elate import visualize_elastic_anisotropy,print_elastic_tensor
 from elate import ELATE, makePolarPlotPosNeg
 from plotchristoffel import run_christoffel_simulation
 from scipy.integrate import quad
+from ase.neighborlist import neighbor_list
 from predict_thickness_2D import predict_thickness_2D
 
 def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt_system,plotparameters,elateparameters):
@@ -94,8 +95,9 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
 
             cell = pos.get_cell()
             thickness  = np.linalg.norm(cell[2]) * 1E-10
-            t_c = V_m*1.E3/thickness
-
+            t_c = thickness / (V_m * 1E3)
+            
+            
             thermalcalculator = ThermalConductivityCalculator(dimensional)
 
             gamma = 3.*(1.+v)/(2.-3.*v)/2. #Grüneisen parameter or x_g = (V_p )/V_s; gamma_2 = 3./2.* (3.*x_g**2 - 4)/(x_g**2 +2) Technical Physics, 2009, Vol. 54, No. 9, pp. 1398–1401
@@ -120,6 +122,26 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
 
             #print("thermalcalculator ", thermalcalculator.slack_low_temp_gamma(V_m*1E3, T_D, volume*1E-30,gamma))
             #print("meanfreepath(self, M, rho, theta, n, T, vm, gamma) ", thermalcalculator.meanfreepath(M, rho, T_D, n, 300, V_m*1E3, gamma)*1E6)
+
+
+            bulk = MeltTempPredictor("3D")
+
+            M_amu     = (pos.get_masses().sum()) / len(pos)
+            omega_m3  = (pos.get_volume() * 1e-30) / len(pos)
+            
+            
+            i, j, dists = neighbor_list('ijd', pos, cutoff=3.5)   # 3.5 Å is generous
+            a_m = dists.min() * 1.0e-10       # Å → m
+            Tm_anderson = bulk.predict("anderson", G_GPa=G)      # G in GPa
+            Tm_bpg      = bulk.predict("bpg", G0_GPa=G,
+                                      omega_m3=omega_m3)          # Ω in m³                                              
+
+            Tm_lind  = bulk.predict("lindemann",
+                                  M_amu=M_amu,
+                                  theta_D=T_D,
+                                  a_m=a_m,
+                                  delta=0.18)
+                                        
                         
             elastic_constants_dict['V_t'] = V_s
             elastic_constants_dict['V_l'] = V_b
@@ -127,26 +149,28 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
             elastic_constants_dict['V_D'] = V_m
             elastic_constants_dict['T_D'] = T_D
             elastic_constants_dict['Q']   = kl 
-            elastic_constants_dict['M_1']   = lame_1
-            elastic_constants_dict['M_2']   = lame_2
+            elastic_constants_dict['λ1']   = lame_1
+            elastic_constants_dict['λ2']   = lame_2
             elastic_constants_dict['S'] = gamma
             elastic_constants_dict['P']   = B/G  
             elastic_constants_dict['K_Clarke']   = K_Clarke
             elastic_constants_dict['K_Cahill']   = K_Cahill
-            elastic_constants_dict['k_Cahill_lowT'] = thermalcalculator.cahill_thermalconduct(V_b*1E3, 300, T_D,n,volume*1E-30)
+            elastic_constants_dict['k_Cahill_lowT'] = thermalcalculator.cahill_thermalconduct([V_b*1E3, V_m*1E3, V_s*1E3], 300, T_D,n,volume*1E-30)
             elastic_constants_dict['k_Slack']   = K_Slack
             elastic_constants_dict['k_Slack_lowT']   = K_Slack_int
             elastic_constants_dict['h_Cv']   = thermalcalculator.constant_volume_hc(T_D, n,300)
             elastic_constants_dict['s_Entropy']   = thermalcalculator.entropy(T_D, n, 300)
             elastic_constants_dict['s_DebyeEntropy']   = thermalcalculator.debye_entropy(T_D, n, 300)
-            elastic_constants_dict['p_Mfp']   = thermalcalculator.meanfreepath(M, rho, T_D, n, 300, V_m*1E3, gamma)*1E6
+            elastic_constants_dict['p_Mfp']   = thermalcalculator.meanfreepath2(M, rho, T_D, n, 300, V_m*1E3, gamma)*1E6
             elastic_constants_dict['C[100]']   = lc_1*1E3
             elastic_constants_dict['C[110]']   = lc_2*1E3
             elastic_constants_dict['C[010]']   = lc_3*1E3
             elastic_constants_dict['C[111]']   = lc_4*1E3
             elastic_constants_dict['C_avg']   =  (lc_1+lc_2+lc_3+lc_4)*1E3/4.
             
-            elastic_constants_dict['D']   = ductility_test(B/G)
+            elastic_constants_dict['M_Lnd']   = Tm_lind
+            elastic_constants_dict['M_And']   = Tm_anderson
+            elastic_constants_dict['M_bpg']   = Tm_bpg # Burakovsky‑Preston‑Greeff melting‑temperature model => Phys. Rev. B 67, 094107 (2003)
 
             np.savetxt("elastic_tensor.dat", elastic_tensor, fmt='%.4f', header='Elastic tensor in Voigt notation')
             rho_str = f"{rho:.8f}"  # Format to 8 decimal places
@@ -190,6 +214,9 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
         except BaseException:
             pass
     elif dimensional == '2D':
+        thickness_2D = predict_thickness_2D(pos, os.getcwd())*1E-10
+        if isinstance(thickness_2D, np.ndarray):
+                thickness_2D = thickness_2D[0]
         try:
             c11 = elastic_constants_dict['c11']
             c12 = elastic_constants_dict['c12']
@@ -218,10 +245,6 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
             cell = pos.get_cell()
             # The 2D density in Kg/m^2
             area = linalg.norm(cross(cell[0], cell[1]))
-
-            thickness_2D = predict_thickness_2D(pos, os.getcwd())*1E-10
-            if isinstance(thickness_2D, np.ndarray):
-                thickness_2D = thickness_2D[0]
             
             vol = area*1E-20 # Note this is the area not volume
             rho_2D = M * 1E-3 / Na / area / 1E-20
@@ -238,7 +261,12 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
             V_mb = (1.0 / 2.0 * (1.0 / V_sb**2.0 + 1 / V_lb**2.0))**(-1.0 / 2.0)
             T_Db = (hbar / k) * (4. * pi * n / area / 1E-20)**(1. / 2.) * V_mb * 1E+3
             layermodulus = 0.25*(c11+c22+2.*c12)
-            hardnessvalues = calculate_hardness((B_a+B_b)/2., (G_a+G_b)/2., (Y_2Da+Y_2Db)/2., (v_a+v_b)/2., vol,dim=dimensional,thickness = thickness_2D)
+            B_avg = (B_a+B_b)/2.
+            G_avg = (G_a+G_b)/2.
+            v_avg = (v_a + v_b)/2; E_avg = (Y_2Da + Y_2Db)/2.
+            T_D_avg = (T_Da+T_Db)/2. 
+            
+            hardnessvalues = calculate_hardness(B_avg, G_avg, E_avg, v_avg, vol,dim=dimensional,thickness = thickness_2D)
             
             if (T_Da +T_Db) > end:
                end = (T_Da +T_Db) +200            
@@ -247,29 +275,43 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
 
             
 
-            v_avg = (v_a + v_b)/2; E_avg = (Y_2Da + Y_2Db)/2.
+            
             gamma = 3.*(1.+v_avg)/(2.-3.*v_avg)/2. #Grüneisen parameter
             delta_atoms = area**(1./2.)/n 
-            
-            
-            K_Slack = thermalcalculator.slack_simple_model(M/n, (T_Da+T_Db)/2., delta_atoms, gamma, n, 300) 
+                       
+            K_Slack = thermalcalculator.slack_simple_model(M/n, T_D_avg, delta_atoms, gamma, n, 300) 
             K_Cahill =  thermalcalculator.cahill_thermal_conductivity(n,area*1E-20,((V_la+V_lb)/2)*1E+3, ((V_sa+V_sb)/2)*1E+3) #k/2.48 * (rho_2D*Na/M/1E-3) *(V_ma)*1E3 
             K_Clarke = thermalcalculator.clarke_model(n,(Y_2Da+Y_2Db)/2.,rho_2D, total_mass)
             
-            t_c = ((V_ma+V_mb)/2.)*1.E3/thickness_2D
-            K_Slack_int = thermalcalculator.slack_low_temp(((V_ma+V_mb)/2.)*1E3, (T_Da+T_Db)/2.,T=300,t_c=t_c)
+            t_c = thickness_2D/(1.E3*(V_ma+V_mb)/2.)
+            
+
+            
+            K_Slack_int = thermalcalculator.slack_low_temp(((V_ma+V_mb)/2.)*1E3, T_D_avg,T=300,t_c=t_c)
 
             temp, cond, cond_slack_simple, cond_cahill,capacities, entropy,debye_entropy,free_energy,mfp = thermalcalculator.compute_thermal_conductivity_over_temperature_range(((V_ma+V_mb)/2.)*1E3,\
-                                                                                                     (T_Da+T_Db)/2., M, \
+                                                                                                     T_D_avg, M, \
                                                                                                       delta_atoms, gamma, n, vol,start, interval, end, rho_2D, t_c,thickness_2D)
             
             filename = "thermodynamic_data.dat"
+            fmt = [     '%.4f',   # 1 T (K)
+                        '%.4e',   # 2 cond  ‑‑ scientific
+                        '%.4f',   # 3 cond_slack_simple
+                        '%.4f',   # 4 cond_cahill
+                        '%.4f',   # 5 Cv
+                        '%.4f',   # 6 S
+                        '%.4f',   # 7 S_Debye
+                        '%.4f',   # 8 H
+                        '%.4f']   # 9 mfp
+                        
             data = np.column_stack((temp, cond, cond_slack_simple, cond_cahill, capacities,entropy,debye_entropy, free_energy,mfp))
-            np.savetxt(filename, data, fmt='%.4f', delimiter=' ', \
+            np.savetxt(filename, data, fmt=fmt, delimiter=' ', \
             header='#T(K), Kl_SlackLow(W/mK), Kl_SlackSim(W/mK), Kl_CahillLow(W/mK), Cv(J/molK), S(J/molK), S_Debye(J/molK), H(eV), mfp(µm)', comments='')
             
 
             Rf = np.sign(Y_2Da + Y_2Db)* sqrt( abs(Y_2Da + Y_2Db)/2./rho_2D/height**2)/2./pi/1E+9  #Resonance_F = sqrt(E/rho/height**2)/2/pi, h here is the thickness
+            
+            
             
             kl = (c11 + 8.*c12)/(7.*c11-2*c12)
             lame_1 = v_avg * E_avg/((1.+ v_avg)*(1.-2.*v_avg))
@@ -283,7 +325,26 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
             lc_2 = analysis_instance_tmp.linear_compressibility(dir_2)
             lc_3 = analysis_instance_tmp.linear_compressibility(dir_3)
 
+
+            pred2D = MeltTempPredictor("2D")
+
+            M_amu     = (pos.get_masses().sum()) / len(pos)
+            omega_m3  = (pos.get_volume() * 1e-30) / len(pos)
             
+            
+            i, j, dists = neighbor_list('ijd', pos, cutoff=4.5)   # 3.5 Å cutoff
+            a_m = dists.min() * 1.0e-10       # Å → m
+            
+            
+            Tm_kthny = pred2D.predict("kthny", a_m=a_m,
+                                    Y2D_Npm=E_avg)                  
+
+            Tm_lind = pred2D.predict("lindemann",
+                                        M_amu=M_amu,
+                                        theta_D=T_D_avg,
+                                        a_m=a_m,
+                                        delta=0.08)
+                        
             elastic_constants_dict['t'] = thickness_2D*1E+10
             elastic_constants_dict['V_l[10]'] = V_la
             elastic_constants_dict['V_l[01]'] = V_lb
@@ -301,32 +362,32 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
             elastic_constants_dict['v[01]'] = v_b
             elastic_constants_dict['B[10]'] = B_a
             elastic_constants_dict['B[01]'] = B_b
-            elastic_constants_dict['L']   = layermodulus 
+            elastic_constants_dict['l']   = layermodulus 
             elastic_constants_dict['Q']   = kl 
-            elastic_constants_dict['M_1']   = lame_1
-            elastic_constants_dict['M_2']   = lame_2
+            elastic_constants_dict['λ1']   = lame_1
+            elastic_constants_dict['λ2']   = lame_2
             elastic_constants_dict['S'] = gamma
             elastic_constants_dict['P[10]']   = B_a/G_a  
             elastic_constants_dict['P[01]']   = B_b/G_b  
             #elastic_constants_dict['R_f'] = Rf
             elastic_constants_dict['K_Clarke']   = K_Clarke
             elastic_constants_dict['K_Cahill']   = K_Cahill
-            elastic_constants_dict['k_Cahill_lowT'] = thermalcalculator.cahill_thermalconduct(((V_la+V_lb)/2.)*1E3, 300, (T_Da+T_Db)/2.,n,vol)
+            elastic_constants_dict['k_Cahill_lowT'] = thermalcalculator.cahill_thermalconduct([V_la*1E3,V_lb*1E3], 300, T_D_avg,n,vol) #((V_la+V_lb)/2.)*1E3
             elastic_constants_dict['k_Slack']   = K_Slack
             elastic_constants_dict['k_Slack_lowT']   = K_Slack_int
             elastic_constants_dict['h_Cv']   = thermalcalculator.constant_volume_hc((T_Da+T_Db)/2., n,300)
             elastic_constants_dict['s_Entropy']   = thermalcalculator.entropy((T_Da+T_Db)/2., n, 300)
             elastic_constants_dict['s_DebyeEntropy']   = thermalcalculator.debye_entropy((T_Da+T_Db)/2., n, 300)
-            elastic_constants_dict['p_Mfp']   = thermalcalculator.meanfreepath(M, rho_2D, (T_Da+T_Db)/2., n, 600, ((V_ma+V_mb)/2.)*1E3, t_c)*thickness_2D*1E6
+            elastic_constants_dict['p_Mfp']   = thermalcalculator.meanfreepath2(M, rho_2D, T_D_avg, n, 300, ((V_ma+V_mb)/2.)*1E3, gamma)*thickness_2D*1E6
             elastic_constants_dict['C[100]']   = lc_1
             elastic_constants_dict['C[110]']   = lc_2
             elastic_constants_dict['C[010]']   = lc_3
             elastic_constants_dict['C_avg']   = (lc_1+lc_2+lc_3)/3.
             elastic_constants_dict['D']   = ductility_test((B_a/G_a + B_b/G_b)/2.) 
+            elastic_constants_dict['M_Lnd']   = Tm_lind
+            elastic_constants_dict['M_Kthny']   = Tm_kthny  # Kosterlitz – Thouless – Halperin – Nelson – Young theory of two‑dimensional (2‑D) melting (J. M. Kosterlitz & D. J. Thouless (topological phase transitions), etc)
             # Build the elastic tensor for plotting
  
-
-            cell = pos.get_cell()
             #length = linalg.norm(cell[2])
             c11 = elastic_tensor[0, 0] 
             c22 = elastic_tensor[1, 1]
@@ -375,8 +436,16 @@ def sound_velocity(elastic_constants_dict, elastic_tensor, cwd, dimensional,latt
                         visualize_elastic_anisotropy(elastic_tensor=elastic_tensor_Q2d, density=rho_2D, plot="2D", elastic_calc=elateparam)
 
 
-        except BaseException:
-            pass
+        #except BaseException:
+        #    pass
+
+        except KeyError as e:
+            print(f"Missing key in elastic_constants_dict: {e}")
+        except ValueError as e:
+            print(f"Value error: {e}")
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            
     elif dimensional == '1D':
         try:
             cell = pos.get_cell()
@@ -542,22 +611,29 @@ class ThermalConductivityCalculator:
     def __init__(self,dimension="3D"):
         self.k = 1.380649e-23  # Boltzmann constant, J/K
         self.hbar = 1.0545718e-34  # Reduced Planck's constant, J·s
-        self.Na   = 6.023E+23
-        self.AMU_to_grams = 1.66053906660e-27
+        self.Na   = 6.022_140_76e23   # Avogadro
+        self.AMU_to_grams = 1.660_539_066_60e-27
         self.dimension = dimension
 
-    def callaway_integrand(self, x, t_ph):
+    def callaway_integrand(self, x, t_c, n=2):
        # return ( x ** 3 * exp(x)) /t_ph/ expm1(x)**2 if  self.dimension =="2D" else  ( x ** 4 * exp(x)) /t_ph/ expm1(x)**2 #Only the x**4 behaves as expected for 2D.
-        return ( x ** 4 * exp(x)) /t_ph/ expm1(x)**2 
+        pow_ = 3 if self.dimension == "2D" else 4
+        tau = self.tau_x(x, t_c, n)
+        #return ( x ** 4 * exp(x)) /t_ph/ expm1(x)**2 
+        return (x ** pow_ * exp(x) * tau) / (expm1(x) ** 2)
 
 
+    def tau_x(self, x, t_c, n=2):
+        return t_c / x**n
 
 #    def callaway_integrand_gamma(self, x):
 #        return ( x ** 3 * exp(x))/ expm1(x)**2 if  self.dimension =="2D" else  ( x ** 4 * exp(x)) / expm1(x)**2 
 
 
-    def slack_integrand(self, x, t_ph):
-        return x  * t_ph  if  self.dimension =="2D" else  x ** 2  * t_ph 
+    def slack_integrand(self, x, tau):
+        #return x  * t_ph  if  self.dimension =="2D" else  x ** 2  * t_ph 
+        pow_ = 1 if self.dimension == "2D" else 2
+        return x ** pow_ * tau
 
     def cahill_integrand(self, x):
         """
@@ -587,11 +663,13 @@ class ThermalConductivityCalculator:
         integral_result, error = quad(integrand, 0, theta / T)
         
         #integral_result, _ = quad(self.cahill_integrand, 0, theta / T)
-        return v_i * (T / theta) ** 2 * integral_result
+        #return v_i * (T / theta) ** 2 * integral_result
+        power = 2 if self.dimension == "2D" else 3
+        return v_i * (T / theta) ** power * integral_result
                  
          
        
-    def slack_low_temp(self, v_m, theta, T=300, t_c=1E+12):
+    def slack_low_temp(self, v_m, theta, T=300, t_c=1E-12):
         """
         Calculate Slack thermal conductivity.
 
@@ -606,8 +684,11 @@ class ThermalConductivityCalculator:
         """
     
         integrand = lambda x: self.callaway_integrand(x, t_c)
-        integral_result, error = quad(integrand, 0, theta / T)
-        return (self.k / (2 * pi ** 2 * v_m)) * (self.k * T / self.hbar) ** 3 * integral_result
+        integral_result, error = quad(integrand, 1e-5, theta / T)
+        power = 2 if self.dimension == "2D" else 3
+        pi_fac = 2*pi            if self.dimension == "2D" else 2*pi**2
+        #return (self.k / (2 * pi ** 2 * v_m)) * (self.k * T / self.hbar) ** 3 * integral_result
+        return (self.k / (pi_fac * v_m)) * (self.k * T / self.hbar) ** power * integral_result
 
 
 
@@ -648,7 +729,10 @@ class ThermalConductivityCalculator:
     
         integrand = lambda x: self.slack_integrand(x, t_c)
         integral_result, error = quad(integrand, 0, theta / T)
-        return (self.k / (2 * pi ** 2 * v_m)) * (self.k * T / self.hbar) ** 3 * integral_result
+        power = 2 if self.dimension == "2D" else 3
+        pi_fac = 2*pi            if self.dimension == "2D" else 2*pi**2
+        #return (self.k / (2 * pi ** 2 * v_m)) * (self.k * T / self.hbar) ** 3 * integral_result
+        return (self.k / (pi_fac * v_m)) * (self.k * T / self.hbar) ** power * integral_result
 
 
     def cahill_thermalconduct(self, velocities, T, theta,n,V):
@@ -668,7 +752,8 @@ class ThermalConductivityCalculator:
         #    n_d = (4 * pi * (n * self.Na / V)) ** (1. / 2.)
         #else:
         #    n_d = ((n*self.Na /V)) ** (2. / 3.)
-        cahill_sum = self.cahill_integrand_summation(velocities, T, theta)
+        #cahill_sum = self.cahill_integrand_summation(velocities, T, theta)
+        cahill_sum = sum(self.cahill_integrand_summation(v, T, theta) for v in velocities)
         
         return (pi / 6) ** (1. / 3.) * self.k * ((n/V))  * cahill_sum  if self.dimension == "2D" else  (pi / 6) ** (1. / 3.) * self.k * ((n /V)) ** (2. / 3.)  * cahill_sum
          
@@ -715,7 +800,7 @@ class ThermalConductivityCalculator:
         if self.dimension == "2D":
             integral_result, _ = quad(integrand, 0, upper_limit)
             t_ratio = t_ratio**2
-            const = 3
+            const = 2
         else:
             integral_result, _ = quad(integrand, 0, upper_limit)
             t_ratio = t_ratio**3
@@ -735,8 +820,8 @@ class ThermalConductivityCalculator:
                     
         if self.dimension == "2D":
             integral_result, _ = quad(integrand, 0, t_d/temp)
-            localterm = 2 * (temp/t_d)**3
-            const = 1.0
+            localterm = 2 * (temp/t_d)**2
+            const = 2.0
         else:
             integral_result, _ = quad(integrand, 0, t_d/temp)
             localterm = 4 * (temp/t_d)**3
@@ -788,7 +873,7 @@ class ThermalConductivityCalculator:
         else:
             powr = 2./3.
         A_0 = 2.43*1.0E-8/(1.0 -0.514/gamma +0.228/gamma**2 ) # See Phys. Rev. 137, A128 (1965)   
-        return (A_0 * M * theta ** 3 * v_a) / (gamma * n ** (powr) * T)
+        return (A_0 * M * theta**3 * v_a) / (gamma**2 * n**powr * T)  #(A_0 * M * theta ** 3 * v_a) / (gamma * n ** (powr) * T)
 
 
     def cahill_thermal_conductivity(self, n, V,v_l, *v_ts):
@@ -876,7 +961,7 @@ class ThermalConductivityCalculator:
         if self.dimension == "2D":
             integral_result, _ = quad(integrand_2D, 0, upper_limit)
             t_ratio = t_ratio**2
-            const = 1
+            const = 2
         else:
             integral_result, _ = quad(integrand, 0, upper_limit)
             t_ratio = t_ratio**3
@@ -888,7 +973,16 @@ class ThermalConductivityCalculator:
 
 
     def enthalpy(self, t_d, n,temp):
-      return (self.internalenergy(t_d, n,temp) - temp*self.entropy(t_d, n, temp))*n/self.Na/1.602E-19
+    
+      """
+      Helmholtz free energy F = U – T S, returned in eV per atom.
+      U and S are per mole of primitive cells, so divide by (n · Nₐ).
+      """
+      F = self.internalenergy(t_d, n, temp) - temp * self.entropy(t_d, n, temp)  # J / mol (cell)
+      return F / (n * self.Na) / 1.602e-19          # eV / atom
+   #   return (self.internalenergy(t_d, n,temp) - temp*self.entropy(t_d, n, temp))*n/self.Na/1.602E-19
+
+
 
     
     def meanfreepath2(self, M, rho, theta, n, T, vm, gamma):
@@ -908,7 +1002,8 @@ class ThermalConductivityCalculator:
         - meanpath: The mean free path of phonons in the material at temperature T, in meters (m).
         """
 
-        molar_mass_kg = M * self.AMU_to_grams * self.Na # Ensure M is in kg/mol
+        #molar_mass_kg = M * self.AMU_to_grams * self.Na # Ensure M is in kg/mol
+        molar_mass_kg = M * 1.0e-3
 
         # Calculate volumetric heat capacity
         cv_volume = self.constant_volume_hc(theta, n, T) * rho / molar_mass_kg  # J/(m^3·K)
@@ -938,7 +1033,8 @@ class ThermalConductivityCalculator:
         - meanpath: The mean free path of phonons in the material at temperature T, in meters (m).
         """
 
-        molar_mass_kg = M * self.AMU_to_grams * self.Na # Ensure M is in kg/mol
+        #molar_mass_kg = M * self.AMU_to_grams * self.Na # Ensure M is in kg/mol
+        molar_mass_kg = M * 1.0e-3
 
         # Calculate volumetric heat capacity
         cv_volume = self.constant_volume_hc(theta, n, T) * rho / molar_mass_kg  # J/(m^3·K)
@@ -950,11 +1046,11 @@ class ThermalConductivityCalculator:
         return meanpath
         
                                 
-    def compute_thermal_conductivity_over_temperature_range(self, v_m, theta, M, v_a, gamma, n, vol, start, interval, end, rho, t_c=1E+12,thickness=None):
+    def compute_thermal_conductivity_over_temperature_range(self, v_m, theta, M, v_a, gamma, n, vol, start, interval, end, rho, t_c=1E-12,thickness=None):
         temperatures = np.arange(start, end + interval, interval)
         thermal_conductivities = []
         thermal_conductivities_slack_simple = []
-        themal_cal_cahill = []
+        thermal_cal_cahill = []
         heat_capacity = []
         entropies =  []
         debye_entropies = []
@@ -964,29 +1060,158 @@ class ThermalConductivityCalculator:
         for T in temperatures:
             conductivity = self.slack_low_temp(v_m, theta, T, t_c)
             conductivity_slack_simple = self.slack_simple_model(M/n, theta, v_a, gamma, n, T)
-            conductivity_cahill = self.cahill_thermalconduct(v_m, T, theta,n,vol)
+            conductivity_cahill = self.cahill_thermalconduct([v_m], T, theta,n,vol)
             capacity = self.constant_volume_hc(theta, n,T)
             entropy = self.entropy(theta, n, T)
             debye_entropy = self.debye_entropy(theta, n, T)
             free_energy = self.enthalpy(theta,n,T)
             
             
-            meanpath = self.meanfreepath(M, rho, theta, n, T, v_m, t_c) * (thickness if thickness is not None else 1) * 1E+6
+            #meanpath = self.meanfreepath(M, rho, theta, n, T, v_m, t_c) * (thickness if thickness is not None else 1) * 1E+6
+            meanpath = self.meanfreepath2(M, rho, theta, n, T, v_m, gamma) * (thickness if thickness is not None else 1) * 1E+6
+            
             heat_capacity.append(capacity)
             thermal_conductivities.append(conductivity)
             thermal_conductivities_slack_simple.append(conductivity_slack_simple)
             entropies.append(entropy)
             debye_entropies.append(debye_entropy)
             free_energies.append(free_energy)
-            themal_cal_cahill.append(conductivity_cahill)
+            thermal_cal_cahill.append(conductivity_cahill)
             mpf.append(meanpath)
             
-
-
-        return temperatures, thermal_conductivities, thermal_conductivities_slack_simple, themal_cal_cahill, heat_capacity, entropies, debye_entropies,free_energies,mpf
- 
-       
+        #return temperatures, thermal_conductivities, thermal_conductivities_slack_simple, thermal_cal_cahill, heat_capacity, entropies, debye_entropies,free_energies,mpf
+        return (temperatures, thermal_conductivities,
+                thermal_conductivities_slack_simple, thermal_cal_cahill,
+                heat_capacity, entropies, debye_entropies,
+                free_energies, mpf)       
          
+
+
+
+
+
+import math
+from dataclasses import dataclass
+
+kB   = 1.380649e-23             # J K⁻¹
+hbar = 1.054571817e-34          # J s
+amu_to_kg = 1.66053906660e-27   # kg per atomic‑mass‑unit
+
+
+@dataclass
+class MeltTempPredictor:
+    """
+    Melting‑temperature estimators.
+
+    Parameters
+    ----------
+    dim : {"3D","2D"}
+        Dimensionality selector.
+    """
+    dim: str = "3D"
+
+    # ---------- ONE‑LINE CORRELATIONS (empirical) --------------------
+    @staticmethod
+    def anderson(G_GPa: float) -> float:
+        """
+        Tm (K) = 553 + 5.91 G   — Anderson (1987) correlation
+        G in GPa.
+        """
+        return 553.0 + 5.91 * G_GPa
+
+    @staticmethod
+    def bpglindemann(G0_GPa: float, omega_m3: float,
+                     beta: float = 0.032) -> float:
+        """
+        Burakovsky‑Preston‑Greeff (2003)
+        Tm = β · G(0) · Ω / kB
+
+        G0_GPa  : zero‑pressure shear modulus, GPa
+        omega_m3: atomic volume, m³ atom⁻¹
+        """
+        return beta * G0_GPa * 1e9 * omega_m3 / kB
+
+    # -------------- LINDEMANN‑TYPE THERMODYNAMIC CRITERION ----------
+
+    def lindemann(self,
+                  M_amu: float,
+                  theta_D: float,
+                  a_m: float,
+                  delta: float = 0.08) -> float:
+        """
+        Melting temperature (K) from vibrational data.
+
+        Parameters
+        ----------
+        M_amu    : average atomic mass (amu atom⁻¹)
+        theta_D  : Debye temperature (K)
+        a_m      : nearest‑neighbour spacing (metres)
+        delta    : Lindemann constant (0.05–0.12 typical)
+
+
+        Returns
+        -------
+        float
+            Melting temperature in kelvin.
+        """
+        # ----- 3‑D Lindemann (relative MSD uses 6 kB) -------------------
+        if self.dim == "3D":
+            M_kg   = M_amu * amu_to_kg
+            omegaD = kB * theta_D / hbar
+            return delta**2 * a_m**2 * M_kg * omegaD**2 / (6.0 * kB)
+
+        # ----- 2‑D Lindemann (relative MSD uses 4 kB) -------------------
+        if self.dim == "2D":
+            M_kg   = M_amu * amu_to_kg
+            omegaD = kB * theta_D / hbar
+            return delta**2 * a_m**2 * M_kg * omegaD**2 / (4.0 * kB)
+
+        raise ValueError("dim must be '3D' or '2D'")
+
+
+    # -------------- KTHNY EXTENSION FOR TRUE 2‑D --------------------
+    @staticmethod
+    def kthny(a_m: float,
+              Y2D_Npm: float,
+              eta: float = 0.6) -> float:
+        """
+        Kosterlitz‑Thouless–Halperin–Nelson–Young melting criterion
+        for strictly 2‑D crystals.
+
+          Tm = a² Y_R / (16 π kB)
+          Y_R ≈ Y0 (1 − η)   with η ≃ 0.1–0.2   (renormalisation)
+
+        a_m      : nearest‑neighbour spacing (m)
+        Y2D_Npm  : in‑plane 2‑D Young modulus (N m⁻¹)
+        """
+        YR = Y2D_Npm * (1.0 - eta)
+        return a_m**2 * YR / (16.0 * math.pi * kB)
+
+    # --------- convenience dispatcher ------------------------------
+    def predict(self, method: str, **kwargs) -> float:
+        """
+        Generic front‑end.
+        method ∈ {"anderson", "bpg", "lindemann", "kthny"}
+        Extra keyword args forwarded to the matching routine.
+        """
+        method = method.lower()
+        if method == "anderson":
+            if self.dim != "3D":
+                raise ValueError("Anderson correlation is bulk‑only.")
+            return self.anderson(**kwargs)
+        elif method == "bpg":
+            if self.dim != "3D":
+                raise ValueError("BPG formula is bulk‑only.")
+            return self.bpglindemann(**kwargs)
+        elif method == "lindemann":
+            return self.lindemann(**kwargs)
+        elif method == "kthny":
+            if self.dim != "2D":
+                raise ValueError("KTHNY is meaningful only for 2‑D.")
+            return self.kthny(**kwargs)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
         
 
 if __name__ == '__main__':

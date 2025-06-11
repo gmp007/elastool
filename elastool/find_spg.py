@@ -81,9 +81,10 @@ class Bravais2D:
                 else:
                     return 'Anisotropy'
         else:
-            print('ERROR: the vacuum is not along the c axis!!!\n')
-            print('Plz adjust the vacuum to be along the c axis!!!\n')
-            exit(1)
+            print('WARNING: Bravais lattice not found. Vacuum potentially not along the c axis! Adopting Anisotropy format.\n')
+            #print('Plz adjust the vacuum to be along the c axis!!!\n')
+            return 'Anisotropy'
+            #exit(1)
 
 
     @property
@@ -145,7 +146,16 @@ class Bravais2D:
         plt.close(fig)
 
 def findspg(atoms):
-    spg0 = spglib.get_spacegroup(atoms, symprec=0.1)
+    try:
+        lattice = atoms.cell.array
+        positions = atoms.get_scaled_positions()
+        numbers = atoms.numbers
+        cell = (lattice, positions, numbers)                   
+        spg0 = spglib.get_spacegroup(cell,symprec=0.1)
+    except TypeError:
+        spg0 = spglib.get_spacegroup(atoms,symprec=0.1)
+        
+    #spg0 = spglib.get_spacegroup(atoms, symprec=0.1)
     if spg0:
         spg1 = spg0.split()
         spg = [str(spg1[0]), int(spg1[1][1:-1])]
@@ -157,7 +167,8 @@ def findspg(atoms):
 
 
 def find_crystal_system(pos_conv, dimensional,tubestrain_type,plotparameters):
-    
+    latt_system = None  # Initialize the lattice system to None
+        
     if dimensional == '1D':
         latt_system = 'Nanotube'  # Default value
         dist_acc = 0.1
@@ -244,4 +255,10 @@ def find_crystal_system(pos_conv, dimensional,tubestrain_type,plotparameters):
             if spg_num <= l[0]:
                 latt_system = l[1]
                 break
+
+    # If lattice system was not set, default to anisotropy and notify the user
+    if not latt_system:
+        print('WARNING: Bravais lattice not found. Adopting Anisotropy format.\n')
+        latt_system = 'anisotropy'
+    
     return latt_system

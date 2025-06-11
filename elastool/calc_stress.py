@@ -23,8 +23,11 @@ from vasp_run import vasp_run
 from extract_mean_values import mean_stress
 from scipy.interpolate import UnivariateSpline
 from scipy.interpolate import CubicSpline
-from scipy.integrate import simps
 import re
+try:
+    from scipy.integrate import simpson as simps  # For newer versions of SciPy
+except ImportError:
+    from scipy.integrate import simps  # For older versions of SciPy
 
 
 strain_data = []

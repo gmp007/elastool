@@ -17,7 +17,8 @@
 
 from os import mkdir, chdir
 from os.path import isdir
-from ase.io import vasp,write
+from ase.io import vasp,write,read
+from ase.geometry import cell_to_cellpar, cellpar_to_cell
 from vasp_run import vasp_run
 from read_input import indict
 import os
@@ -38,14 +39,28 @@ import shutil
 
 #    return pos_optimized
     
-    
+
+
+def remove_spurious_distortion(pos):
+    # Normalize and orthogonalize the cell vectors
+    cell_params = cell_to_cellpar(pos.get_cell())
+    new_cell = cellpar_to_cell(cell_params)
+    pos.set_cell(new_cell, scale_atoms=True)
+
+    # Adjust atom positions
+    pos.wrap()
+
+    pos.center()
+
+    return pos
+        
     
 
 def optimize_initial_str(pos_conv, cwd, tag, fresh=False, max_retries=3):
 #    if not os.path.isdir('OPT'):
 #        os.mkdir('OPT')
 #    os.chdir('OPT')
-
+    pos_conv = remove_spurious_distortion(pos_conv)
     opt_dir = os.path.join(cwd, 'OPT')
     
     if fresh:
@@ -59,6 +74,7 @@ def optimize_initial_str(pos_conv, cwd, tag, fresh=False, max_retries=3):
     os.chdir(opt_dir)
     
     attempt = 0
+    pos_optimized = None
     while attempt < max_retries:
         try:
             write('POSCAR', pos_conv, format='vasp', direct=True)
@@ -71,12 +87,26 @@ def optimize_initial_str(pos_conv, cwd, tag, fresh=False, max_retries=3):
             print(f"An error occurred on attempt {attempt}: {e}")
             if attempt < max_retries and os.path.exists('CONTCAR') and os.path.getsize('CONTCAR') > 0:
                 print("Attempting to restart from CONTCAR...")
-                shutil.copy('CONTCAR', 'POSCAR')
-            #else:
-            #    print("Maximum retries reached or CONTCAR file not found/empty.")
+                #shutil.copy('CONTCAR', 'POSCAR')
+
+                # Read CONTCAR and apply spurious distortion removal
+                pos_optimized = vasp.read_vasp(os.path.join(opt_dir, 'CONTCAR'))
+                pos_optimized = remove_spurious_distortion(pos_optimized)
+
+                # Write the cleaned structure back to POSCAR
+                write('POSCAR', pos_optimized, format='vasp', direct=True)
+                
+            else:
+                print("Maximum retries reached or no valid CONTCAR available.")
             #    raise
         finally:
-            os.chdir('..')
-
+            os.chdir(cwd) #os.chdir('..')
+    # Apply distortion removal after optimization
+    #pos_optimized = remove_spurious_distortion(pos_optimized)
+    # Final distortion removal after optimization
+    if pos_optimized:
+        pos_optimized = remove_spurious_distortion(pos_optimized)
+        write(os.path.join(opt_dir, 'CONTCAR'), pos_optimized, format='vasp', direct=True)
+    
     return pos_optimized #if attempt < max_retries else None
 

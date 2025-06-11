@@ -25,6 +25,7 @@ from write_default_input import write_default_input,write_default_elastool_in,pr
 from material_analysis import MaterialAnalysis
 from plotchristoffel import run_christoffel_simulation
 from plot_christoffel_gnu import write_gnuplot_scripts, run_gnuplot_scripts
+from elastoolgui import elastoolguicall
 
 def read_elastic_tensor(file_name):
     # Reading the elastic tensor from the file
@@ -112,8 +113,6 @@ def print_pp_message(message):
     print('+' + '-' * (max_width + 2) + '+')
 
 
-
-
 def post_process(latt_system,plotly_flag):
     rho, dim = read_rho_dim("massdensity_dim.dat")
     elastic_tensor = read_elastic_tensor("elastic_tensor.dat")
@@ -181,7 +180,17 @@ def post_process(latt_system,plotly_flag):
     sys.exit(0)
         
 
+gui_flag = False
+if len(sys.argv) > 1:
+    first_arg = sys.argv[1].lower()
+    gui_flag = first_arg in ["-gui"]
 
+
+if gui_flag:
+    elastoolguicall()
+    sys.exit(0)  
+ 
+ 
 elastool_in_exists = os.path.exists(os.path.join(cwd, "elastool.in"))
 run_mode_flag_elastoolin = (len(sys.argv) > 1 and sys.argv[1] == "-0")
 if run_mode_flag_elastoolin and not elastool_in_exists:

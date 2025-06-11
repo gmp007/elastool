@@ -15,6 +15,9 @@
 
 """
 import os
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from view_file import InputFileViewer
 
 def write_default_input(method_stress_statistics, cwd):
     
@@ -306,7 +309,7 @@ parallel_submit_command = vasp_cmd > log.vasp
 
 
 
-def display_help():
+def display_help(keyword=None, use_tk=False):
     help_text = """---------------------------
 ElasTool Help Documentation
 ---------------------------
@@ -363,13 +366,30 @@ repeat_num = kx ky kz
 num_last_samples = 500
 potential_dir = /user/potential/
 parallel_submit_command = vasp_cmd > log.vasp
-```
 
 Please ensure to replace placeholder values with your specific values, especially for parameters like `structure_file`, `repeat_num`, `potential_dir`, and `parallel_submit_command`. Always consult the relevant documentation and guidelines for your system and simulation needs.
 
 You can now directly view the spatial dependence of the elastic parameters using Elate. To do this, simply run "elastool -elate" after completing the strain-stress calculation and choose the browser of your choice.
     """
-    print(help_text)
+
+    if use_tk:
+        # Use tkinter to display the help text
+        help_window = tk.Toplevel()
+        help_window.title("ElasTool Help")
+
+        text_widget = tk.Text(help_window, wrap="word", width=100, height=30)
+        text_widget.pack(expand=True, fill="both")
+
+        text_widget.insert("1.0", help_text)
+        text_widget.config(state="disabled")
+
+        scrollbar = tk.Scrollbar(help_window, command=text_widget.yview)
+        text_widget.config(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+    else:
+        # Print the help text to the console
+        print(help_text)
+
 
 
 
